@@ -13,6 +13,7 @@ import toast from 'react-hot-toast';
 import { format } from 'date-fns';
 import ReactQuill from 'react-quill';
 import 'react-quill/dist/quill.snow.css';
+import LiveDiffView from '../components/common/LiveDiffView';
 
 const modules = {
   toolbar: [
@@ -51,69 +52,67 @@ export default function PromptDetail() {
   const [selectedModel, setSelectedModel] = useState('GPT-4');
   const [parallelText, setParallelText] = useState('Parallel text goes here');
   const [allPanelsExpanded, setAllPanelsExpanded] = useState(true);
-  const [changeDescription, setChangeDescription] = useState('');
+  const [changeDescription, setChangeDescription] = useState(''); // This will be orphaned for now
   const [activeBranch, setActiveBranch] = useState<string | null>(null);
+  const [originalContentForDiff, setOriginalContentForDiff] = useState('');
 
   const { prompts, createPrompt, updatePrompt, forkPrompt } = usePrompts();
-  const { createVersion, versions, branches } = useVersionControl(id);
+  // const { createVersion, versions, branches } = useVersionControl(id); // createVersion call will be removed
+  const { versions, branches } = useVersionControl(id); // Only need versions and branches here
 
   // Define handleSave before using it in useAutosave
   const handleSave = useCallback(async () => {
     try {
-      if (!changeDescription) {
-        toast.error('Please provide a description of your changes');
-        return;
-      }
+      // The changeDescription was for the manual createVersion call.
+      // If usePrompts.ts is to use it, updatePrompt signature needs to change.
+      // For now, changeDescription is not used directly for versioning here.
+      // if (!changeDescription) {
+      //   toast.error('Please provide a description of your changes');
+      //   return;
+      // }
 
-      let promptId = id;
-      
-      // If it's a new prompt or we're creating a new version
-      if (!promptId) {
-        const newPrompt = await createPrompt.mutateAsync({
+      let promptIdToReturn = id;
+      let savedContent = promptContent; // Capture current content before async ops
+
+      if (isNewPrompt || !id) {
+        const newPromptData = {
           title: promptTitle,
           body: promptContent,
-          tags: promptTags.map(tag => tag.text),
-          metadata: {
-            model: selectedModel,
-            parallelText,
-          },
-          status: 'draft',
-          visibility: 'private'
-        });
-        promptId = newPrompt.id;
-        navigate(`/prompts/${promptId}`);
+          tags: promptTags.map(tag => ({ name: tag.text })), // Map to {name: string} for backend
+          metadata: { model: selectedModel, parallelText },
+          status: 'draft' as 'draft',
+          visibility: 'private' as 'private'
+        };
+        const newPrompt = await createPrompt.mutateAsync(newPromptData);
+        promptIdToReturn = newPrompt.id;
+        savedContent = newPrompt.body; // content from the newly created prompt
+        toast.success('Prompt created successfully!');
+        if (promptIdToReturn) {
+          navigate(`/prompts/${promptIdToReturn}`);
+        }
       } else {
-        await updatePrompt.mutateAsync({
-          id: promptId,
+        const updateData = {
+          id,
           title: promptTitle,
-          body: promptContent,
-          tags: promptTags.map(tag => tag.text),
-          metadata: {
-            model: selectedModel,
-            parallelText,
-          }
-        });
+          body: promptContent, // This is the new body
+          tags: promptTags.map(tag => ({ name: tag.text })), // Map to {name: string} for backend
+          metadata: { model: selectedModel, parallelText },
+          // Potentially add changeDescription here if usePrompts.updatePrompt supports it
+        };
+        await updatePrompt.mutateAsync(updateData);
+        toast.success('Prompt updated successfully!');
       }
 
-      // Create a new version
-      await createVersion.mutateAsync({
-        content: {
-          title: promptTitle,
-          body: promptContent,
-          tags: promptTags.map(tag => tag.text),
-          model: selectedModel,
-          parallelText
-        },
-        changeLog: changeDescription,
-        branchId: activeBranch
-      });
+      setOriginalContentForDiff(savedContent); // Update baseline for diff after successful save
+      setChangeDescription(''); // Clear change description after save
 
-      return promptId;
+      return promptIdToReturn;
     } catch (error) {
       console.error('Save error:', error);
-      throw error;
+      toast.error(`Error saving prompt: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      throw error; // Re-throw for useAutosave or other callers
     }
-  }, [id, promptTitle, promptContent, promptTags, selectedModel, parallelText, changeDescription, activeBranch, createPrompt, updatePrompt, createVersion, navigate]);
+  }, [id, isNewPrompt, promptTitle, promptContent, promptTags, selectedModel, parallelText, /*changeDescription, activeBranch,*/ createPrompt, updatePrompt, navigate]);
 
   // Initialize autosave with the save handler
   const { saveStatus } = useAutosave({
@@ -151,10 +150,21 @@ export default function PromptDetail() {
       if (prompt) {
         setPromptTitle(prompt.title);
         setPromptContent(prompt.body);
-        setPromptTags(prompt.tags.map(tag => ({ id: tag, text: tag })));
+        setOriginalContentForDiff(prompt.body); // Initialize diff baseline
+        // prompt.tags is now Array<{ id: string; name: string }>
+        setPromptTags(prompt.tags.map(tag => ({ id: tag.id, text: tag.name })));
         setSelectedModel(prompt.metadata?.model || 'GPT-4');
         setParallelText(prompt.metadata?.parallelText || '');
+      } else if (!isNewPrompt) {
+        // Prompt not found in list, maybe direct navigation to a prompt not yet in cache
+        // Consider fetching directly if needed, or rely on query cache to eventually populate
+        console.warn(`Prompt with id ${id} not found in prompts list.`);
+        // Initialize with empty or fetch logic
+        setOriginalContentForDiff('');
       }
+    } else {
+      // New prompt
+      setOriginalContentForDiff(''); // No initial content for new prompts
     }
   }, [id, prompts, isNewPrompt]);
 
@@ -256,9 +266,17 @@ export default function PromptDetail() {
                   onChange={setPromptContent}
                   modules={modules}
                   formats={formats}
-                  className="h-[300px]"
+                  className="h-[300px] mb-4" // Added margin bottom
                 />
-                <div className="flex items-center justify-between text-sm text-gray-500">
+                {/* Live Diff View */}
+                <CollapsiblePanel
+                  title="Live Diff (Changes from last save)"
+                  panelKey="live-diff"
+                  isExpandedProp={true} // Default to expanded, or make it stateful
+                >
+                  <LiveDiffView oldContent={originalContentForDiff} newContent={promptContent} />
+                </CollapsiblePanel>
+                <div className="flex items-center justify-between text-sm text-gray-500 mt-2"> {/* Added margin top */}
                   <div>
                     {charCount} characters • {wordCount} words
                   </div>
@@ -321,10 +339,15 @@ export default function PromptDetail() {
               {versions && versions.length > 0 ? (
                 <VersionHistory
                   promptId={id!}
+                  currentPromptContent={promptContent}
+                  currentPromptTitle={promptTitle || 'Current Draft'}
                   onRestore={(version) => {
-                    setPromptContent(version.content.body);
+                    const newBody = version.content.body;
+                    setPromptContent(newBody);
+                    setOriginalContentForDiff(newBody); // Update diff baseline on restore
                     setPromptTitle(version.content.title);
-                    setPromptTags(version.content.tags.map((tag: string) => ({ id: tag, text: tag })));
+                    // Assuming version.content.tags is also Array<{ id: string; name: string }>
+                    setPromptTags(version.content.tags.map((tag: { id: string; name: string }) => ({ id: tag.id, text: tag.name })));
                     setSelectedModel(version.content.model);
                     setParallelText(version.content.parallelText);
                     toast.success('Version restored');

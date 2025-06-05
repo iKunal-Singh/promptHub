@@ -2,6 +2,16 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Styles for LiveDiffView component */
+.diff-ins {
+  background-color: #e6ffed; /* Light green for insertions */
+  text-decoration: none;
+}
+.diff-del {
+  background-color: #ffeef0; /* Light red for deletions */
+  text-decoration: line-through;
+}
+
 @layer base {
   body {
     background-color: theme('colors.background');

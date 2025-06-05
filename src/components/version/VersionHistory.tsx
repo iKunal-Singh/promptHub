@@ -1,20 +1,30 @@
 import { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../common/Card';
 import Button from '../common/Button';
-import { History, ArrowLeft, ArrowRight, Check, X, Clock, User, GitBranch, GitMerge, GitPullRequest } from 'lucide-react';
+import { History, ArrowLeft, ArrowRight, Check, X, Clock, User, GitBranch, GitMerge, GitPullRequest, CompareArrows } from 'lucide-react';
 import { format } from 'date-fns';
 import { useVersionControl } from '../../hooks/useVersionControl';
 import toast from 'react-hot-toast';
+import PromptComparisonView from './PromptComparisonView'; // Added import
 
 interface VersionHistoryProps {
   promptId: string;
   onRestore: (version: any) => void;
+  currentPromptContent: string;
+  currentPromptTitle: string;
 }
 
-export default function VersionHistory({ promptId, onRestore }: VersionHistoryProps) {
-  const [selectedVersion, setSelectedVersion] = useState<any>(null);
-  const [showDiff, setShowDiff] = useState(false);
+export default function VersionHistory({
+  promptId,
+  onRestore,
+  currentPromptContent,
+  currentPromptTitle
+}: VersionHistoryProps) {
+  // const [selectedVersion, setSelectedVersion] = useState<any>(null); // Seems unused, can remove if not needed for other features
+  // const [showDiff, setShowDiff] = useState(false); // Seems unused
   const [activeBranch, setActiveBranch] = useState<string | null>(null);
+  const [versionForCompare, setVersionForCompare] = useState<any | null>(null);
+  const [isCompareModalOpen, setIsCompareModalOpen] = useState(false);
   
   const {
     versions,
@@ -183,6 +193,25 @@ export default function VersionHistory({ promptId, onRestore }: VersionHistoryPr
                     >
                       Request Changes
                     </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        setVersionForCompare(version);
+                        setIsCompareModalOpen(true);
+                      }}
+                      leftIcon={<CompareArrows size={14} />}
+                    >
+                      Compare with Current
+                    </Button>
+                     <Button
+                        size="sm"
+                        variant="primary"
+                        onClick={() => onRestore(version)}
+                        leftIcon={<History size={14} />}
+                      >
+                        Restore
+                      </Button>
                   </div>
                 </div>
 
@@ -223,6 +252,50 @@ export default function VersionHistory({ promptId, onRestore }: VersionHistoryPr
           </div>
         </CardContent>
       </Card>
+
+      {isCompareModalOpen && versionForCompare && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0,0,0,0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000 // Ensure modal is on top
+          }}
+          onClick={() => setIsCompareModalOpen(false)} // Close on backdrop click
+        >
+          <div
+            style={{
+              background: 'white',
+              padding: '20px',
+              borderRadius: '8px',
+              width: '80%',
+              maxWidth: '1000px',
+              maxHeight: '90vh',
+              overflowY: 'auto'
+            }}
+            onClick={e => e.stopPropagation()} // Prevent modal close when clicking inside
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <h2 style={{ fontSize: '1.5rem', fontWeight: 'bold' }}>Compare Versions</h2>
+              <Button onClick={() => setIsCompareModalOpen(false)} variant="ghost" size="sm">
+                <X size={20} />
+              </Button>
+            </div>
+            <PromptComparisonView
+              versionAName={`Version ${versionForCompare.version_number} (${format(new Date(versionForCompare.created_at), 'MMM d, h:mm a')})`}
+              versionAContent={versionForCompare.content?.body || JSON.stringify(versionForCompare.content, null, 2)}
+              versionBName={currentPromptTitle}
+              versionBContent={currentPromptContent}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

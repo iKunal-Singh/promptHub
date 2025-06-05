@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useDebounce } from 'use-debounce';
 import { Card, CardContent, CardHeader, CardTitle } from '../common/Card';
 import Button from '../common/Button';
 import { Search, Filter, X } from 'lucide-react';
@@ -31,9 +32,57 @@ export default function SearchFilters({
   const [sortBy, setSortBy] = useState('relevance');
   const [sortDirection, setSortDirection] = useState('desc');
 
+  const [debouncedSearchTerm] = useDebounce(searchTerm, 500);
+
+  useEffect(() => {
+    // Construct filters object similar to handleSearch
+    const currentFilters = {
+      query: debouncedSearchTerm, // Use debounced term
+      categories: selectedCategories.length > 0 ? selectedCategories : undefined,
+      models: selectedModels.length > 0 ? selectedModels : undefined,
+      dateRange: dateRange.start || dateRange.end ? {
+        start: dateRange.start ? new Date(dateRange.start) : undefined,
+        end: dateRange.end ? new Date(dateRange.end) : undefined,
+      } : undefined,
+      complexity: {
+        min: complexity.min,
+        max: complexity.max,
+      },
+      sort: {
+        field: sortBy,
+        direction: sortDirection,
+      },
+    };
+    onSearch(currentFilters);
+  }, [
+    debouncedSearchTerm,
+    selectedCategories,
+    selectedModels,
+    dateRange,
+    complexity,
+    sortBy,
+    sortDirection,
+    onSearch
+  ]);
+
   const handleSearch = () => {
+    // Manual search uses the immediate searchTerm, or could also use debouncedSearchTerm
+    // For consistency with auto-search, let's use debouncedSearchTerm here too,
+    // or ensure onSearch is robust to rapid calls if searchTerm is used.
+    // The prompt asked to keep manual search, so it implies it can be immediate.
+    // Let's keep it using the immediate searchTerm for now as it was.
+    // Or, more simply, this button could just trigger what useEffect does if needed,
+    // but the current implementation will call onSearch with potentially non-debounced term.
+    // Given useEffect now handles debounced search, the manual button could be seen as an
+    // "instant" search if desired, or it could be removed.
+    // For this implementation, let's make manual search also use the latest filters including debounced term
+    // to avoid confusion, though typically a manual button implies "search now with what I see".
+    // The prompt implies to keep both, so handleSearch will just call onSearch with current raw state
+    // if the user wants to bypass debounce.
+    // Let's stick to the current implementation of handleSearch for now, which uses raw searchTerm.
+    // The useEffect will handle the debounced search.
     onSearch({
-      query: searchTerm,
+      query: searchTerm, // Manual search uses the current (non-debounced) searchTerm
       categories: selectedCategories.length > 0 ? selectedCategories : undefined,
       models: selectedModels.length > 0 ? selectedModels : undefined,
       dateRange: dateRange.start || dateRange.end ? {
@@ -59,7 +108,10 @@ export default function SearchFilters({
     setComplexity({ min: 1, max: 5 });
     setSortBy('relevance');
     setSortDirection('desc');
+    // onReset might also need to clear searchTerm which then clears debouncedSearchTerm
+    // and triggers a search with empty filters via useEffect. This is usually desired.
     onReset();
+    // After onReset, useEffect will run with cleared filters.
   };
 
   const toggleCategory = (category: string) => {
