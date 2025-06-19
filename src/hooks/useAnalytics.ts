@@ -58,37 +58,35 @@ export function useAnalytics(days: number = 30) {
         
         const startDate = startOfDay(subDays(new Date(), days));
         
-        // Fetch analytics data
-        const { data: analyticsData, error: analyticsError } = await supabase
-          .from('prompt_analytics')
-          .select('*')
-          .gte('date', startDate.toISOString());
+        const [
+          analyticsResult,
+          tokenResult,
+          executionResult,
+          engagementResult,
+          promptsResult,
+          categoryResult
+        ] = await Promise.all([
+          supabase.from('prompt_analytics').select('*').gte('date', startDate.toISOString()),
+          supabase.from('token_usage_logs').select('*').gte('created_at', startDate.toISOString()),
+          supabase.from('prompt_executions').select('*').gte('created_at', startDate.toISOString()),
+          supabase.from('user_engagement').select('*').gte('created_at', startDate.toISOString()),
+          supabase.from('prompts').select('id, title'),
+          supabase.from('prompt_search_index').select('category').not('category', 'is', null)
+        ]);
 
-        if (analyticsError) throw analyticsError;
+        if (analyticsResult.error) throw analyticsResult.error;
+        if (tokenResult.error) throw tokenResult.error;
+        if (executionResult.error) throw executionResult.error;
+        if (engagementResult.error) throw engagementResult.error;
+        if (promptsResult.error) throw promptsResult.error;
+        if (categoryResult.error) throw categoryResult.error;
 
-        // Fetch token usage data
-        const { data: tokenData, error: tokenError } = await supabase
-          .from('token_usage_logs')
-          .select('*')
-          .gte('created_at', startDate.toISOString());
-
-        if (tokenError) throw tokenError;
-
-        // Fetch execution data
-        const { data: executionData, error: executionError } = await supabase
-          .from('prompt_executions')
-          .select('*')
-          .gte('created_at', startDate.toISOString());
-
-        if (executionError) throw executionError;
-
-        // Fetch engagement data
-        const { data: engagementData, error: engagementError } = await supabase
-          .from('user_engagement')
-          .select('*')
-          .gte('created_at', startDate.toISOString());
-
-        if (engagementError) throw engagementError;
+        const analyticsData = analyticsResult.data;
+        const tokenData = tokenResult.data;
+        const executionData = executionResult.data;
+        const engagementData = engagementResult.data;
+        const promptsData = promptsResult.data;
+        const categoryData = categoryResult.data;
 
         // Calculate total usage metrics
         const totalUsage = analyticsData?.reduce((sum, day) => sum + (day.views || 0), 0) || 0;
@@ -148,13 +146,6 @@ export function useAnalytics(days: number = 30) {
           uniqueUsers: new Set(engagementData?.map(e => e.user_id)).size || 0
         };
 
-        // Get prompts and calculate top prompts client-side
-        const { data: promptsData, error: promptsError } = await supabase
-          .from('prompts')
-          .select('id, title');
-
-        if (promptsError) throw promptsError;
-
         // Calculate usage and engagement for each prompt
         const promptStats = promptsData?.map(prompt => {
           const promptEngagement = engagementData?.filter(e => e.prompt_id === prompt.id) || [];
@@ -184,13 +175,6 @@ export function useAnalytics(days: number = 30) {
         }));
 
         // Calculate category distribution
-        const { data: categoryData, error: categoryError } = await supabase
-          .from('prompt_search_index')
-          .select('category')
-          .not('category', 'is', null);
-
-        if (categoryError) throw categoryError;
-
         const categoryDistribution = Object.entries(
           categoryData?.reduce((acc, { category }) => {
             acc[category] = (acc[category] || 0) + 1;
