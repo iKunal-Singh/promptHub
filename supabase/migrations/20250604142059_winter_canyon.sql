@@ -24,6 +24,15 @@ ALTER TABLE teams
 ALTER TABLE projects 
   ADD COLUMN IF NOT EXISTS deleted_at timestamptz DEFAULT NULL;
 
+ALTER TABLE comments
+  ADD COLUMN IF NOT EXISTS deleted_at timestamptz DEFAULT NULL;
+
+ALTER TABLE team_members
+  ADD COLUMN IF NOT EXISTS deleted_at timestamptz DEFAULT NULL;
+
+ALTER TABLE prompt_versions
+  ADD COLUMN IF NOT EXISTS deleted_at timestamptz DEFAULT NULL;
+
 -- Create helper function for prompt access control
 CREATE OR REPLACE FUNCTION can_user_access_prompt(p_prompt_id uuid, p_user_id uuid)
 RETURNS boolean 
