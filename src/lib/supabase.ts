@@ -24,38 +24,39 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   },
 });
 
+// Track connection status to avoid repeated failed attempts
+let connectionStatus: 'unknown' | 'connected' | 'failed' = 'unknown';
+let lastConnectionAttempt = 0;
+const CONNECTION_RETRY_DELAY = 30000; // 30 seconds
+
 // Verify connection with better error messaging and graceful fallback
-export const verifySupabaseConnection = async () => {
+export const verifySupabaseConnection = async (): Promise<boolean> => {
+  // Avoid hammering the server with repeated connection attempts
+  const now = Date.now();
+  if (connectionStatus === 'failed' && now - lastConnectionAttempt < CONNECTION_RETRY_DELAY) {
+    return false;
+  }
+
+  lastConnectionAttempt = now;
+
   try {
-    // First try to check if we can reach Supabase at all
-    const { data, error } = await supabase.from('prompt_analytics').select('count').limit(1);
+    // Use a simpler query that doesn't depend on specific tables
+    const { data, error } = await supabase.auth.getSession();
     
     if (error) {
-      // Check if it's a table not found error (which means connection works but tables don't exist)
-      if (error.code === 'PGRST116' || error.message.includes('relation') || error.message.includes('does not exist')) {
-        console.warn('Supabase connected but tables not found. Database may need to be set up.');
-        return false; // Connection works but tables don't exist
-      }
-      
-      console.error('Supabase connection error:', error);
-      throw new Error('Failed to connect to Supabase. Please ensure your Supabase project is properly configured.');
+      console.warn('Supabase auth check failed:', error.message);
+      connectionStatus = 'failed';
+      return false;
     }
     
+    connectionStatus = 'connected';
     return true;
   } catch (err: any) {
-    // Handle network errors more gracefully
-    if (err.name === 'TypeError' && err.message.includes('NetworkError')) {
-      console.error('Network error connecting to Supabase:', err);
-      throw new Error('Unable to reach Supabase. Please check your internet connection and ensure your Supabase project URL is correct.');
-    }
+    console.warn('Supabase connection failed:', err.message);
+    connectionStatus = 'failed';
     
-    if (err.name === 'TypeError' && err.message.includes('fetch')) {
-      console.error('Fetch error connecting to Supabase:', err);
-      throw new Error('Unable to connect to Supabase. Please ensure your Supabase project is accessible and your environment variables are correct.');
-    }
-    
-    console.error('Failed to connect to Supabase:', err);
-    throw err;
+    // Don't throw errors, just return false to allow graceful degradation
+    return false;
   }
 };
 
@@ -67,9 +68,27 @@ export const isSupabaseConfigured = () => {
 // Helper function to get connection status without throwing
 export const getSupabaseConnectionStatus = async () => {
   try {
-    await verifySupabaseConnection();
-    return { connected: true, error: null };
+    const connected = await verifySupabaseConnection();
+    return { connected, error: connected ? null : 'Unable to connect to Supabase' };
   } catch (error: any) {
     return { connected: false, error: error.message };
+  }
+};
+
+// Helper function to safely execute Supabase operations
+export const safeSupabaseOperation = async <T>(
+  operation: () => Promise<T>,
+  fallbackValue: T
+): Promise<T> => {
+  try {
+    const isConnected = await verifySupabaseConnection();
+    if (!isConnected) {
+      console.warn('Supabase not available, using fallback value');
+      return fallbackValue;
+    }
+    return await operation();
+  } catch (error) {
+    console.warn('Supabase operation failed, using fallback value:', error);
+    return fallbackValue;
   }
 };
