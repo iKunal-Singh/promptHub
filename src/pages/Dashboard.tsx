@@ -20,7 +20,8 @@ import {
   LineChart as LineChartIcon,
   DollarSign,
   Zap,
-  MoreVertical
+  MoreVertical,
+  AlertCircle
 } from 'lucide-react';
 import { usePrompts } from '../hooks/usePrompts';
 import { useAnalytics } from '../hooks/useAnalytics';
@@ -44,7 +45,13 @@ import {
 function ErrorFallback({ error, resetErrorBoundary }: { error: Error; resetErrorBoundary: () => void }) {
   return (
     <div className="text-center py-8">
-      <p className="text-error-600 mb-4">Error loading dashboard data</p>
+      <div className="flex items-center justify-center mb-4">
+        <AlertCircle className="text-error-600 mr-2" size={24} />
+        <p className="text-error-600 text-lg font-medium">Error loading dashboard data</p>
+      </div>
+      <p className="text-gray-600 dark:text-gray-400 mb-4">
+        There was a problem connecting to the database. Please check your connection and try again.
+      </p>
       <Button onClick={resetErrorBoundary}>Try again</Button>
     </div>
   );
@@ -66,9 +73,9 @@ function formatChartDate(date: string | number | Date) {
 
 function DashboardContent() {
   const navigate = useNavigate();
-  const { prompts, isLoading: isPromptsLoading } = usePrompts();
-  const { data: analytics, isLoading: isAnalyticsLoading, refetch } = useAnalytics(7); // Last 7 days
-  const { userTeams, isLoading: isTeamsLoading } = useTeam();
+  const { prompts, isLoading: isPromptsLoading, error: promptsError } = usePrompts();
+  const { data: analytics, isLoading: isAnalyticsLoading, error: analyticsError, refetch } = useAnalytics(7); // Last 7 days
+  const { userTeams, isLoading: isTeamsLoading, error: teamsError } = useTeam();
   const { user } = useAuth();
   const [activityFilter, setActivityFilter] = useState<string | null>(null);
 
@@ -80,10 +87,32 @@ function DashboardContent() {
     return () => clearInterval(interval);
   }, [refetch]);
 
+  // Show loading state
   if (isPromptsLoading || isAnalyticsLoading || isTeamsLoading) {
     return <LoadingSpinner />;
   }
 
+  // Handle connection errors gracefully
+  const hasConnectionError = promptsError || analyticsError || teamsError;
+  
+  if (hasConnectionError) {
+    return (
+      <div className="text-center py-12">
+        <div className="flex items-center justify-center mb-4">
+          <AlertCircle className="text-warning-600 mr-2" size={32} />
+          <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Connection Issue</h2>
+        </div>
+        <p className="text-gray-600 dark:text-gray-400 mb-6 max-w-md mx-auto">
+          We're having trouble connecting to the database. Some features may not be available right now.
+        </p>
+        <Button onClick={() => window.location.reload()}>
+          Retry Connection
+        </Button>
+      </div>
+    );
+  }
+
+  // Safely access data with fallbacks
   const userPrompts = prompts?.filter(p => p.creator_id === user?.id) || [];
   const recentPrompts = userPrompts
     .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
@@ -92,6 +121,7 @@ function DashboardContent() {
   const activeTeamMembers = userTeams?.reduce((total, team) => total + (team.team.members?.length || 0), 0) || 0;
 
   const getChangeIndicator = (current: number, previous: number) => {
+    if (previous === 0) return { value: '0', isIncrease: true, text: 'no change' };
     const percentChange = ((current - previous) / previous) * 100;
     const isIncrease = percentChange > 0;
     return {
@@ -101,13 +131,21 @@ function DashboardContent() {
     };
   };
 
-  const currentPeriod = analytics?.historicalData.slice(-7) || [];
-  const previousPeriod = analytics?.historicalData.slice(-14, -7) || [];
+  // Safely access analytics data with fallbacks
+  const historicalData = analytics?.historicalData || [];
+  const currentPeriod = historicalData.slice(-7);
+  const previousPeriod = historicalData.slice(-14, -7);
   
   const usageChange = getChangeIndicator(
-    currentPeriod.reduce((sum, day) => sum + day.usage, 0),
-    previousPeriod.reduce((sum, day) => sum + day.usage, 0)
+    currentPeriod.reduce((sum, day) => sum + (day.usage || 0), 0),
+    previousPeriod.reduce((sum, day) => sum + (day.usage || 0), 0)
   );
+
+  // Default values for analytics
+  const totalUsage = analytics?.totalUsage || 0;
+  const tokensUsed = analytics?.tokensUsed || 0;
+  const estimatedCost = analytics?.estimatedCost || 0;
+  const topPrompts = analytics?.topPrompts || [];
 
   return (
     <div className="space-y-6 animate-fadeIn">
@@ -129,7 +167,7 @@ function DashboardContent() {
               <div>
                 <p className="text-sm font-medium text-gray-500 dark:text-gray-400">Total Usage</p>
                 <p className="text-3xl font-bold mt-1 text-gray-900 dark:text-white">
-                  {analytics?.totalUsage.toLocaleString()}
+                  {totalUsage.toLocaleString()}
                 </p>
               </div>
               <div className="p-3 bg-primary-100 dark:bg-primary-900/30 rounded-full text-primary-600 dark:text-primary-400">
@@ -153,7 +191,7 @@ function DashboardContent() {
               <div>
                 <p className="text-sm font-medium text-gray-500 dark:text-gray-400">Token Usage</p>
                 <p className="text-3xl font-bold mt-1 text-gray-900 dark:text-white">
-                  {analytics?.tokensUsed.toLocaleString()}
+                  {tokensUsed.toLocaleString()}
                 </p>
               </div>
               <div className="p-3 bg-accent-100 dark:bg-accent-900/30 rounded-full text-accent-600 dark:text-accent-400">
@@ -197,7 +235,7 @@ function DashboardContent() {
               <div>
                 <p className="text-sm font-medium text-gray-500 dark:text-gray-400">Estimated Cost</p>
                 <p className="text-3xl font-bold mt-1 text-gray-900 dark:text-white">
-                  ${analytics?.estimatedCost.toFixed(2)}
+                  ${estimatedCost.toFixed(2)}
                 </p>
               </div>
               <div className="p-3 bg-warning-100 dark:bg-warning-900/30 rounded-full text-warning-600 dark:text-warning-400">
@@ -220,34 +258,44 @@ function DashboardContent() {
         </CardHeader>
         <CardContent>
           <div className="h-[300px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={analytics?.historicalData}>
-                <defs>
-                  <linearGradient id="colorUsage" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#3B82F6" stopOpacity={0.1}/>
-                    <stop offset="95%" stopColor="#3B82F6" stopOpacity={0}/>
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis 
-                  dataKey="date" 
-                  tickFormatter={formatChartDate}
-                  minTickGap={30}
-                />
-                <YAxis />
-                <Tooltip 
-                  labelFormatter={(date) => format(new Date(date), 'PPP')}
-                  formatter={(value: number) => [value.toLocaleString(), 'Usage']}
-                />
-                <Area 
-                  type="monotone" 
-                  dataKey="usage" 
-                  stroke="#3B82F6" 
-                  fillOpacity={1} 
-                  fill="url(#colorUsage)" 
-                />
-              </AreaChart>
-            </ResponsiveContainer>
+            {historicalData.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={historicalData}>
+                  <defs>
+                    <linearGradient id="colorUsage" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#3B82F6" stopOpacity={0.1}/>
+                      <stop offset="95%" stopColor="#3B82F6" stopOpacity={0}/>
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis 
+                    dataKey="date" 
+                    tickFormatter={formatChartDate}
+                    minTickGap={30}
+                  />
+                  <YAxis />
+                  <Tooltip 
+                    labelFormatter={(date) => format(new Date(date), 'PPP')}
+                    formatter={(value: number) => [value.toLocaleString(), 'Usage']}
+                  />
+                  <Area 
+                    type="monotone" 
+                    dataKey="usage" 
+                    stroke="#3B82F6" 
+                    fillOpacity={1} 
+                    fill="url(#colorUsage)" 
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="flex items-center justify-center h-full text-gray-500 dark:text-gray-400">
+                <div className="text-center">
+                  <BarChartIcon size={48} className="mx-auto mb-4 opacity-50" />
+                  <p>No usage data available</p>
+                  <p className="text-sm mt-1">Data will appear once you start using prompts</p>
+                </div>
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -259,44 +307,52 @@ function DashboardContent() {
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              {recentPrompts.map(prompt => (
-                <Card
-                  key={prompt.id}
-                  isClickable
-                  onClick={() => navigate(`/prompts/${prompt.id}`)}
-                  className="relative group"
-                >
-                  <CardContent className="p-4">
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <h3 className="font-medium text-gray-900 dark:text-white group-hover:text-accentBlue transition-colors">
-                          {prompt.title.length > 50 ? `${prompt.title.substring(0, 47)}...` : prompt.title}
-                        </h3>
-                        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                          {prompt.body.substring(0, 100)}...
-                        </p>
-                        <div className="flex items-center mt-2 text-sm text-gray-500 dark:text-gray-400">
-                          <Clock size={14} className="mr-1" />
-                          {formatDistanceToNow(new Date(prompt.updated_at), { addSuffix: true })}
+              {recentPrompts.length > 0 ? (
+                recentPrompts.map(prompt => (
+                  <Card
+                    key={prompt.id}
+                    isClickable
+                    onClick={() => navigate(`/prompts/${prompt.id}`)}
+                    className="relative group"
+                  >
+                    <CardContent className="p-4">
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1">
+                          <h3 className="font-medium text-gray-900 dark:text-white group-hover:text-accentBlue transition-colors">
+                            {prompt.title.length > 50 ? `${prompt.title.substring(0, 47)}...` : prompt.title}
+                          </h3>
+                          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                            {prompt.body.substring(0, 100)}...
+                          </p>
+                          <div className="flex items-center mt-2 text-sm text-gray-500 dark:text-gray-400">
+                            <Clock size={14} className="mr-1" />
+                            {formatDistanceToNow(new Date(prompt.updated_at), { addSuffix: true })}
+                          </div>
+                        </div>
+                        <div className="relative">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="opacity-0 group-hover:opacity-100 transition-opacity"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              // Handle menu open
+                            }}
+                          >
+                            <MoreVertical size={16} />
+                          </Button>
                         </div>
                       </div>
-                      <div className="relative">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="opacity-0 group-hover:opacity-100 transition-opacity"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            // Handle menu open
-                          }}
-                        >
-                          <MoreVertical size={16} />
-                        </Button>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
+                    </CardContent>
+                  </Card>
+                ))
+              ) : (
+                <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                  <Edit size={48} className="mx-auto mb-4 opacity-50" />
+                  <p>No recent prompts</p>
+                  <p className="text-sm mt-1">Create your first prompt to get started</p>
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>
@@ -345,51 +401,61 @@ function DashboardContent() {
             <CardTitle>Community Highlights</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {analytics?.topPrompts.map(prompt => (
-                <div 
-                  key={prompt.id} 
-                  className="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                  onClick={() => navigate(`/prompts/${prompt.id}`)}
-                >
-                  <div className="flex items-center mb-3">
-                    <div className="w-8 h-8 rounded-full bg-primary-500 flex items-center justify-center text-white text-sm">
-                      {prompt.title[0]}
+            {topPrompts.length > 0 ? (
+              <>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {topPrompts.map(prompt => (
+                    <div 
+                      key={prompt.id} 
+                      className="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                      onClick={() => navigate(`/prompts/${prompt.id}`)}
+                    >
+                      <div className="flex items-center mb-3">
+                        <div className="w-8 h-8 rounded-full bg-primary-500 flex items-center justify-center text-white text-sm">
+                          {prompt.title[0]}
+                        </div>
+                        <div className="ml-3">
+                          <p className="font-medium text-gray-900 dark:text-white">Community</p>
+                          <TagBadge variant="blue" size="sm">Featured</TagBadge>
+                        </div>
+                      </div>
+                      
+                      <h3 className="font-medium text-gray-900 dark:text-white mb-2">{prompt.title}</h3>
+                      
+                      <div className="flex items-center justify-between text-sm text-gray-500 dark:text-gray-400">
+                        <div className="flex items-center">
+                          <Star size={14} className="text-yellow-500 fill-current mr-1" />
+                          {((prompt.engagement || 0) / 20).toFixed(1)}
+                        </div>
+                        <div className="flex items-center">
+                          <GitFork size={14} className="mr-1" />
+                          {prompt.usage || 0}
+                        </div>
+                        <div className="flex items-center">
+                          <Eye size={14} className="mr-1" />
+                          {prompt.engagement || 0}
+                        </div>
+                      </div>
                     </div>
-                    <div className="ml-3">
-                      <p className="font-medium text-gray-900 dark:text-white">Community</p>
-                      <TagBadge variant="blue" size="sm">Featured</TagBadge>
-                    </div>
-                  </div>
-                  
-                  <h3 className="font-medium text-gray-900 dark:text-white mb-2">{prompt.title}</h3>
-                  
-                  <div className="flex items-center justify-between text-sm text-gray-500 dark:text-gray-400">
-                    <div className="flex items-center">
-                      <Star size={14} className="text-yellow-500 fill-current mr-1" />
-                      {(prompt.engagement / 20).toFixed(1)}
-                    </div>
-                    <div className="flex items-center">
-                      <GitFork size={14} className="mr-1" />
-                      {prompt.usage}
-                    </div>
-                    <div className="flex items-center">
-                      <Eye size={14} className="mr-1" />
-                      {prompt.engagement}
-                    </div>
-                  </div>
+                  ))}
                 </div>
-              ))}
-            </div>
 
-            <Button 
-              variant="outline" 
-              className="w-full mt-6"
-              leftIcon={<ArrowRight size={16} />}
-              onClick={() => navigate('/community')}
-            >
-              Explore Community Library
-            </Button>
+                <Button 
+                  variant="outline" 
+                  className="w-full mt-6"
+                  leftIcon={<ArrowRight size={16} />}
+                  onClick={() => navigate('/community')}
+                >
+                  Explore Community Library
+                </Button>
+              </>
+            ) : (
+              <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                <Star size={48} className="mx-auto mb-4 opacity-50" />
+                <p>No community highlights available</p>
+                <p className="text-sm mt-1">Check back later for featured prompts</p>
+              </div>
+            )}
           </CardContent>
         </Card>
 
