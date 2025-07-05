@@ -62,11 +62,12 @@ export const useAnalytics = () => {
           supabase.from('prompt_analytics').select('views'),
           supabase.from('users').select('id', { count: 'exact', head: true }),
           supabase
-            .from('prompt_analytics')
+            .from('user_engagement')
             .select(`
               id,
-              action,
+              action_type,
               prompts!inner(title),
+              users!inner(email),
               created_at
             `)
             .order('created_at', { ascending: false })
@@ -94,9 +95,9 @@ export const useAnalytics = () => {
         const recentActivity = activityResult.status === 'fulfilled' && activityResult.value.data
           ? activityResult.value.data.map((item: any) => ({
               id: item.id,
-              action: item.action,
+              action: item.action_type,
               prompt_title: item.prompts?.title || 'Unknown',
-              user_email: 'Unknown', // Since we can't join with users table from prompt_analytics
+              user_email: item.users?.email || 'Unknown',
               created_at: item.created_at
             }))
           : [];
