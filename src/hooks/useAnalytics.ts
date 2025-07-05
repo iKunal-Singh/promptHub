@@ -56,19 +56,17 @@ export const useAnalytics = () => {
           analyticsResult,
           usersResult,
           activityResult,
-          topPromptsResult,
-          userGrowthResult
+          topPromptsResult
         ] = await Promise.allSettled([
           supabase.from('prompts').select('id', { count: 'exact', head: true }),
-          supabase.from('prompt_analytics').select('views, forks'),
-          supabase.from('profiles').select('id', { count: 'exact', head: true }),
+          supabase.from('prompt_analytics').select('views'),
+          supabase.from('users').select('id', { count: 'exact', head: true }),
           supabase
             .from('prompt_analytics')
             .select(`
               id,
               action,
               prompts!inner(title),
-              profiles!inner(email),
               created_at
             `)
             .order('created_at', { ascending: false })
@@ -78,21 +76,17 @@ export const useAnalytics = () => {
             .select(`
               id,
               title,
-              prompt_analytics!inner(views, forks)
+              prompt_analytics!inner(views)
             `)
-            .order('prompt_analytics.views', { ascending: false })
-            .limit(5),
-          supabase.rpc('get_user_growth_data')
+            .limit(5)
         ]);
 
         // Process results with fallbacks
         const totalPrompts = promptsResult.status === 'fulfilled' ? (promptsResult.value.count || 0) : 0;
         
         let totalViews = 0;
-        let totalForks = 0;
         if (analyticsResult.status === 'fulfilled' && analyticsResult.value.data) {
           totalViews = analyticsResult.value.data.reduce((sum: number, item: any) => sum + (item.views || 0), 0);
-          totalForks = analyticsResult.value.data.reduce((sum: number, item: any) => sum + (item.forks || 0), 0);
         }
 
         const totalUsers = usersResult.status === 'fulfilled' ? (usersResult.value.count || 0) : 0;
@@ -102,7 +96,7 @@ export const useAnalytics = () => {
               id: item.id,
               action: item.action,
               prompt_title: item.prompts?.title || 'Unknown',
-              user_email: item.profiles?.email || 'Unknown',
+              user_email: 'Unknown', // Since we can't join with users table from prompt_analytics
               created_at: item.created_at
             }))
           : [];
@@ -112,22 +106,18 @@ export const useAnalytics = () => {
               id: item.id,
               title: item.title,
               views: item.prompt_analytics?.views || 0,
-              forks: item.prompt_analytics?.forks || 0
+              forks: 0 // Set to 0 since forks column doesn't exist
             }))
-          : [];
-
-        const userGrowth = userGrowthResult.status === 'fulfilled' && userGrowthResult.value.data
-          ? userGrowthResult.value.data
           : [];
 
         return {
           totalPrompts,
           totalViews,
-          totalForks,
+          totalForks: 0, // Set to 0 since forks column doesn't exist
           totalUsers,
           recentActivity,
           topPrompts,
-          userGrowth
+          userGrowth: [] // Return empty array since RPC function doesn't exist
         };
 
       } catch (error: any) {
