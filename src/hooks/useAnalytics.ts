@@ -67,7 +67,7 @@ export const useAnalytics = () => {
               id,
               action_type,
               prompts!inner(title),
-              users!inner(email),
+              user:user_id(email),
               created_at
             `)
             .order('created_at', { ascending: false })
@@ -97,7 +97,7 @@ export const useAnalytics = () => {
               id: item.id,
               action: item.action_type,
               prompt_title: item.prompts?.title || 'Unknown',
-              user_email: item.users?.email || 'Unknown',
+              user_email: item.user?.email || 'Unknown',
               created_at: item.created_at
             }))
           : [];
